@@ -57,10 +57,9 @@ def get_openai_config(use_azure: bool = True) -> dict:
         return {
             'use_azure': True,
             'api_key': os.getenv("AZURE_API_KEY"),
-            'azure_endpoint': "https://haagahelia-poc-gaik.openai.azure.com/openai/deployments/gpt-4.1/chat/completions?",
-            'azure_audio_endpoint': "https://haagahelia-poc-gaik.openai.azure.com/openai/deployments/whisper/audio/translations?api-version=2024-06-01",
-            'api_version': "2024-12-01-preview",
-            'model': 'gpt-4.1',
+            'azure_endpoint': os.getenv("AZURE_ENDPOINT", "https://haagahelia-poc-gaik.openai.azure.com"),
+            'api_version': os.getenv("AZURE_API_VERSION", "2024-12-01-preview"),
+            'model': os.getenv("AZURE_DEPLOYMENT_NAME", "gpt-4.1"),
         }
     else:
         return {
@@ -84,7 +83,7 @@ def create_openai_client(config: dict):
         return AzureOpenAI(
             api_key=config['api_key'],
             api_version=config['api_version'],
-            azure_endpoint=config['azure_endpoint'].split("/openai/")[0],
+            azure_endpoint=config['azure_endpoint'],
         )
     else:
         return OpenAI(api_key=config['api_key'])
@@ -683,7 +682,7 @@ def smart_extraction_workflow(
             {
                 "role": "user",
                 "content": (
-                    # f"EXTRACTION TASK:\n{user_description}\n\n"
+                    f"EXTRACTION TASK:\n{user_description}\n\n"
                     f"Extract data according to the schema below.\n"
                     f"If extracting multiple items, ensure ALL items are included in the result.\n\n"
                     f"Schema fields:\n{schema_hint}\n\n"
@@ -919,7 +918,7 @@ class SchemaGenerator:
         user_requirements: str,
         documents: list[str],
         json_path: str = "extraction_results.json",
-        # csv_path: str = "extraction_results.csv"
+        csv_path: str = "extraction_results.csv"
     ) -> list[dict]:
         """
         Extract data and save to JSON and CSV files.
