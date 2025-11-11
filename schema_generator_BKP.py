@@ -1,29 +1,12 @@
 """
 Dynamic Schema Extraction with Structured Outputs
-
-A class-based system for extracting structured data from documents using LLMs.
-Automatically generates Pydantic schemas from natural language requirements and
-extracts type-safe data with validation.
-
-Features:
-- Smart structure detection (flat vs nested data)
-- Automatic Pydantic model generation from natural language
-- Deterministic extraction (temperature=0, top_p=1, optional seed)
-- Strong schema validation (enums, regex patterns, formats)
-- Strict typing with Pydantic (forbid extras, constrained types)
+Improved version with:
+- Deterministic parsing (temperature=0, top_p=1, optional seed)
+- Stronger “schema-of-the-schema” (enums, regex/patterns, formats, uniqueness)
+- Stricter dynamic Pydantic models (forbid extras, constrained types)
 - Prompt hardening + fenced inputs to reduce prompt injection
 - Normalization layer (dates, EUR currency, list splitting)
-- Retries with exponential backoff
-- Support for Azure OpenAI and OpenAI
-
-Main Interface:
-    from schema_generator import SchemaGenerator
-
-    generator = SchemaGenerator(use_azure=True)
-    results = generator.extract(
-        user_requirements="Extract invoice number and total...",
-        documents=["document text"]
-    )
+- Retries with exponential backoff, basic usage logging
 """
 
 from __future__ import annotations
@@ -136,8 +119,8 @@ def _parse_with(*, client, model: str, messages: list[dict], response_format: ty
             response_format=response_format,
             temperature=0,
             top_p=1.0,
-            seed=12345,      
-            timeout=30,      
+            seed=12345,      # remove if your endpoint doesn't support seeding
+            timeout=30,      # seconds; remove if your SDK doesn't support it
         )
     )
 
@@ -219,7 +202,7 @@ class StructureAnalysis(BaseModel):
 
 def detect_structure_type(user_description: str, *, client=None, model: str = None) -> StructureAnalysis:
     """
-    Analyze if the extraction requires a nested list structure or flat structure.
+    Stage 1: Analyze if the extraction requires a nested list structure or flat structure.
     """
     if client is None:
         config = get_openai_config(use_azure=True)
@@ -283,7 +266,7 @@ def parse_nested_requirements(
     elif model is None:
         raise ValueError("model must be provided when client is specified")
 
-    print("Analyzing structure type...")
+    print("Stage 1: Analyzing structure type...")
     analysis = detect_structure_type(user_description, client=client, model=model)
 
     print(f"✓ Structure type: {analysis.structure_type}")
@@ -300,13 +283,13 @@ def parse_nested_requirements(
     print(f"  → Using nested structure with '{analysis.parent_container_name}' field")
     print(f"  Parent: {analysis.parent_description}")
 
-    print("\nParsing item-level fields...")
+    print("\nStage 2: Parsing item-level fields...")
     item_requirements = parse_user_requirements(analysis.item_description, client=client, model=model)
 
     print(f"✓ Identified {len(item_requirements.fields)} fields per item")
     print(f"  Fields: {[f.field_name for f in item_requirements.fields]}")
 
-    print("\nCreating nested Pydantic model...")
+    print("\nStage 3: Creating nested Pydantic model...")
     ItemModel = create_extraction_model(item_requirements)
 
     # Create parent model with items list
@@ -592,48 +575,182 @@ def extract_from_document(
     return resp.choices[0].message.parsed
 
 # -----------------------------------------------------------------------------
+# COMPLETE WORKFLOW
+# -----------------------------------------------------------------------------
+
+def dynamic_extraction_workflow(
+    user_description: str,
+    documents: list[str],
+    *,
+    client=None,
+    model: str = None,
+) -> list[dict]:
+    """
+    LEGACY: Flat-only workflow (kept for backward compatibility).
+    Use smart_extraction_workflow() instead for automatic nested/flat detection.
+
+    1) Parse user requirements → ExtractionRequirements
+    2) Build dynamic Pydantic model
+    3) Extract from each document with structured outputs
+    4) Normalize outputs (dates, EUR, lists) and return dicts
+    """
+    if client is None:
+        config = get_openai_config(use_azure=True)
+        client = create_openai_client(config)
+        model = model if model else config['model']
+    elif model is None:
+        raise ValueError("model must be provided when client is specified")
+
+    print("Step 1: Parsing user requirements...")
+    requirements = parse_user_requirements(user_description, client=client, model=model)
+    print(f"✓ Identified {len(requirements.fields)} fields")
+    print("  Fields:", [f.field_name for f in requirements.fields])
+
+    print("\nStep 2: Creating dynamic Pydantic schema...")
+    ExtractionModel = create_extraction_model(requirements)
+    print(f"✓ Created schema: {ExtractionModel.__name__}")
+
+    # Print the generated Pydantic model
+    print_pydantic_schema(ExtractionModel, title="Generated Pydantic Schema")
+
+    print("\nStep 3: Extracting from documents...")
+    results: list[dict] = []
+    for i, doc in enumerate(documents, start=1):
+        print(f"  Processing document {i}/{len(documents)}...")
+        parsed = extract_from_document(doc, ExtractionModel, requirements, client=client, model=model)
+        normalized = _normalize_record(parsed.model_dump(), requirements)
+        results.append(normalized)
+
+    print(f"✓ Extracted data from {len(documents)} documents")
+    return results
+
+
+def smart_extraction_workflow(
+    user_description: str,
+    documents: list[str],
+    *,
+    client=None,
+    model: str = None,
+) -> list[dict]:
+    """
+    SMART WORKFLOW: Automatically detects nested vs flat structure.
+
+    Two-stage parsing:
+    1) Detect structure type (nested_list or flat)
+    2) Parse fields appropriately
+    3) Create correct Pydantic model (nested or flat)
+    4) Extract from documents
+    5) Normalize and return
+    """
+    if client is None:
+        config = get_openai_config(use_azure=True)
+        client = create_openai_client(config)
+        model = model if model else config['model']
+    elif model is None:
+        raise ValueError("model must be provided when client is specified")
+
+    print("="*80)
+    print("SMART EXTRACTION WORKFLOW")
+    print("="*80)
+
+    # Stage 1 & 2: Detect structure and parse requirements
+    ExtractionModel, item_requirements = parse_nested_requirements(user_description, client=client, model=model)
+
+    # Print the generated model
+    print("\n" + "="*80)
+    print("GENERATED PYDANTIC MODEL")
+    print("="*80)
+    print_pydantic_schema(ExtractionModel, title="Extraction Schema")
+
+    # Stage 3: Extract from documents
+    print("\n" + "="*80)
+    print("EXTRACTION PHASE")
+    print("="*80)
+    results: list[dict] = []
+
+    for i, doc in enumerate(documents, start=1):
+        print(f"\nProcessing document {i}/{len(documents)}...")
+
+        # Build extraction prompt with context about structure
+        schema_hint = _schema_hint(item_requirements)
+
+        messages = [
+            {"role": "system", "content": SYSTEM_PARSER},
+            {
+                "role": "user",
+                "content": (
+                    f"EXTRACTION TASK:\n{user_description}\n\n"
+                    f"Extract data according to the schema below.\n"
+                    f"If extracting multiple items, ensure ALL items are included in the result.\n\n"
+                    f"Schema fields:\n{schema_hint}\n\n"
+                    f"Document:\n```txt\n{doc}\n```"
+                ),
+            },
+        ]
+
+        resp = _parse_with(client=client, model=model, messages=messages, response_format=ExtractionModel)
+        if getattr(resp, "usage", None):
+            print(f"  [extraction] tokens={resp.usage.total_tokens}")
+
+        parsed = resp.choices[0].message.parsed
+        result_dict = parsed.model_dump()
+
+        # Normalize nested items if present
+        if isinstance(result_dict, dict):
+            for key, value in result_dict.items():
+                if isinstance(value, list) and len(value) > 0 and isinstance(value[0], dict):
+                    # Normalize each item in the list
+                    normalized_items = [_normalize_record(item, item_requirements) for item in value]
+                    result_dict[key] = normalized_items
+                    print(f"  ✓ Extracted {len(normalized_items)} items")
+
+        results.append(result_dict)
+
+    print(f"\n✓ Completed extraction from {len(documents)} document(s)")
+    return results
+
+
+# -----------------------------------------------------------------------------
 # REUSABLE CLASS INTERFACE
 # -----------------------------------------------------------------------------
 
 class SchemaGenerator:
     """
-    Schema generator for dynamic data extraction from documents.
+    Reusable schema generator for dynamic data extraction.
 
-    Automatically detects nested vs flat data structures and generates
-    appropriate Pydantic models from natural language requirements.
-
-    Features:
-    - Smart structure detection (flat vs nested)
-    - Type-safe Pydantic model generation
-    - Support for Azure OpenAI and OpenAI
-    - Deterministic extraction with retries
-    - Export to JSON and CSV
+    Automatically detects nested vs flat structure and generates appropriate
+    Pydantic models from natural language requirements.
 
     Usage:
-        # Initialize with Azure OpenAI (default)
-        generator = SchemaGenerator(use_azure=True)
-
-        # Or with standard OpenAI
-        generator = SchemaGenerator(use_azure=False)
-
-        # Extract data
+        generator = SchemaGenerator(model="gpt-4o")
         results = generator.extract(
             user_requirements="Extract invoice number and amount...",
             documents=["document text 1", "document text 2"]
-        )
-
-        # Extract and save to files
-        results = generator.extract_to_files(
-            user_requirements="...",
-            documents=["..."],
-            json_path="output.json",
-            csv_path="output.csv"
         )
     """
 
     def __init__(self, use_azure: bool = True, model: Optional[str] = None):
         """
         Initialize the SchemaGenerator.
+
+        Args:
+            use_azure: If True, use Azure OpenAI. If False, use standard OpenAI (default: True)
+            model: Optional model override. If not specified, uses model from config.
+                   NOTE: For Azure, this should be the DEPLOYMENT NAME (e.g., 'gpt-4.1'),
+                         not the model name (e.g., 'gpt-4.1-2025-04-14').
+
+        Examples:
+            # Use Azure with default deployment
+            generator = SchemaGenerator(use_azure=True)
+
+            # Use standard OpenAI with default model
+            generator = SchemaGenerator(use_azure=False)
+
+            # Use Azure with custom deployment name
+            generator = SchemaGenerator(use_azure=True, model='my-custom-deployment')
+
+            # Use OpenAI with different model
+            generator = SchemaGenerator(use_azure=False, model='gpt-4o')
         """
         self.config = get_openai_config(use_azure=use_azure)
         self.model = model if model else self.config['model']
@@ -695,7 +812,7 @@ class SchemaGenerator:
         print("="*80)
 
         # Stage 1: Detect structure type and store analysis
-        print("Analyzing structure type...")
+        print("Stage 1: Analyzing structure type...")
         self.structure_analysis = detect_structure_type(user_requirements, client=self.client, model=self.model)
         print(f"✓ Structure type: {self.structure_analysis.structure_type}")
         print(f"  Reasoning: {self.structure_analysis.reasoning}")
@@ -710,13 +827,13 @@ class SchemaGenerator:
             print(f"  → Using nested structure with '{self.structure_analysis.parent_container_name}' field")
             print(f"  Parent: {self.structure_analysis.parent_description}")
 
-            print("\nParsing item-level fields...")
+            print("\nStage 2: Parsing item-level fields...")
             self.item_requirements = parse_user_requirements(self.structure_analysis.item_description, client=self.client, model=self.model)
 
             print(f"✓ Identified {len(self.item_requirements.fields)} fields per item")
             print(f"  Fields: {[f.field_name for f in self.item_requirements.fields]}")
 
-            print("\nCreating nested Pydantic model...")
+            print("\nStage 3: Creating nested Pydantic model...")
             ItemModel = create_extraction_model(self.item_requirements)
 
             from typing import List
