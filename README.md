@@ -1,14 +1,14 @@
 # Knowledge Extraction Using Dynamic Schema Generation
 
-A document data extraction system that automatically generates Pydantic schemas from natural language requirements and extracts structured data from PDFs and text documents.
+Extract structured data from documents using natural language requirements. Automatically generates Pydantic schemas and validates extracted data.
+
+**[View Workflow Diagram →](WORKFLOW.md)**
 
 ## Features
 
-- **Dynamic Schema Generation**: Describe what you want to extract in plain English
-- **Smart Structure Detection**: Automatically detects flat vs nested data structures
-- **PDF Processing**: Convert PDFs to markdown with vision models
-- **Multi-Provider Support**: Works with Azure OpenAI or OpenAI
-- **Type Safety**: Generates strict Pydantic models with validation
+- **Natural Language → Schema**: Describe extraction needs in plain English
+- **Auto Structure Detection**: Detects flat vs nested data patterns
+- **Type-Safe**: Pydantic validation with retry logic
 
 ## Installation
 
@@ -77,17 +77,6 @@ parser = VisionParser(
 markdown_pages = parser.convert_pdf("input/document.pdf")
 ```
 
-### PO+BOM Extraction
-
-```python
-from extractor import main, extract_po_bom_data
-
-# Step 1: Parse PDFs and classify documents
-combined_path = main()
-
-# Step 2: Extract and match PO+BOM data
-results = extract_po_bom_data(combined_path)
-```
 
 ## API Providers
 
