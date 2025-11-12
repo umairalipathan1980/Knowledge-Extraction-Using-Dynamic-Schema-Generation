@@ -14,9 +14,10 @@ from typing import Tuple
 # Add parent directory to path to import vision_parser module
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from parsers.vision_parser import VisionParser, get_openai_config
 from schema_generator import SchemaGenerator
-
+from data_extractor import DataExtractor
+from extraction_config import get_openai_config
+from parsers.vision_parser import VisionParser
 
 try:
     # Optional imports; only needed if classify_document() constructs its own client
@@ -109,16 +110,21 @@ def main():
     config = get_openai_config(use_azure=True)  # set False to use non-Azure OpenAI
     custom_prompt = ""  # Optional extra parsing instructions
 
-    # 2) Initialize VisionParser
-    print("\nCreating VisionParser...")
+    # 2) Initialize VisionParser (uses PyMuPDF for PDF to image conversion)
+    print("\nCreating Parser...")
     parser = VisionParser(
         openai_config=config,         # Required
         custom_prompt=custom_prompt,  # Optional
-        poppler_path=None,            # Auto-detected on Windows if None
         use_context=True,             # Improves multi-page continuity
-        dpi=300,                      # 200 is OK; 300 for denser docs
+        dpi=150,                      # 200 is OK; 300 for denser docs
         clean_output=True             # Clean/merge tables across pages
     )
+
+    # parser = PyMuPDFParser()
+    # Parse document with markdown format (simple text)
+
+
+
     print("✓ Parser initialized")
 
     # 3) PDFs to process
@@ -139,12 +145,14 @@ def main():
         path = str(Path(path))  # normalize
         print(f"\nParsing PDF: {path}")
 
-        # 4a) Parse the full document -> convert_pdf returns a list, get first element
-        # With clean_output=True, it returns a list with one merged string
+        # 4a) Parse the full document
+        # VisionParser.convert_pdf() returns a list of strings (one per page or merged)
         markdown_pages = parser.convert_pdf(path)
+
         if not markdown_pages or not isinstance(markdown_pages, list):
             raise RuntimeError(f"Invalid parse result for: {path}")
 
+        # With clean_output=True, it returns a list with one merged string
         full_markdown = markdown_pages[0] if len(markdown_pages) == 1 else ''.join(markdown_pages)
         if not full_markdown.strip():
             raise RuntimeError(f"Empty parse result for: {path}")
@@ -194,7 +202,7 @@ def extract_po_bom_data(combined_file_path: str = "./combined_classified_output.
     and align them so that each PO item is enriched with the correct technical details.
 
     Start with the customer purchase order, which could have multiple items. The item is linked to its BOM via a Material Number.
-    For every item in the PO, pull out the Material Number along with the basic item details like Quantity, Description, and Delivery Date.
+    For every item in the PO, pull out the Material Number along with the basic item details like Quantity, Description, sales order number, and Delivery Date.
 
     Use the item's Material Number from the PO to find the BOM having the same Material Number (represented as 'ID' at Level 0).
     From the matching BOM, extract the part's 'Type/Part Designation' and Dimensions.
@@ -203,12 +211,15 @@ def extract_po_bom_data(combined_file_path: str = "./combined_classified_output.
     Repeat this process for all items in the PO.
 
     The final output should therefore contain as many lines as the number of items in the PO. Each line should have:
+    - PO number (from PO)
+    - Item number (from PO)
+    - Description (combination of Description and Description 3) (from PO)
     - Material Number (from PO → linked with 'ID' at Level 0 in BOM)
     - Quantity or number of pieces (PC) (from PO)
-    - Description (combination of Description, Description3, and Sales Order) (from PO)
+    - Sales order number (from PO) 
     - Delivery Date (from PO)
     - Type/Part Designation (from BOM)
-    - Dimensions (from BOM) - The dimension is referred to as SAHAUSPIT
+    - Dimensions (from BOM) [The dimension is referred to as SAHAUSPIT]
 
     IMPORTANT: There could be multiple items in the PO (hence multiple Material Numbers). For each Material Number,
     the above mentioned fields have to be extracted and matched with the corresponding BOM.
@@ -225,15 +236,24 @@ def extract_po_bom_data(combined_file_path: str = "./combined_classified_output.
         print("Please run the main() function first to generate the combined file.")
         return None
 
-    # Create SchemaGenerator and extract
-    # use_azure=True by default, which uses 'gpt-4.1' deployment
-    generator = SchemaGenerator(use_azure=True)
+    config = get_openai_config(use_azure=True)  # Set to False for standard OpenAI
 
-    results = generator.extract_to_files(
+    # Step 1: Generate schema
+    generator = SchemaGenerator(config=config)
+    schema = generator.generate_schema(user_requirements=user_requirements)
+
+    print(f"\n✓ Generated schema: {schema.__name__}")
+    print(f"  Structure: {generator.structure_analysis.structure_type}")
+
+    # Step 2: Extract data
+    extractor = DataExtractor(config=config)
+    results = extractor.extract(
+        extraction_model=schema,
+        requirements=generator.item_requirements,
         user_requirements=user_requirements,
         documents=[combined_content],
-        json_path="po_bom_extraction_results.json",
-        # csv_path="po_bom_extraction_results.csv"
+        save_json=True,
+        json_path="po_bom_extraction_results.json"
     )
 
     # Display results summary

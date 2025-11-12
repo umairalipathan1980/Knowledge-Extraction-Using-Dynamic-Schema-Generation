@@ -1,17 +1,17 @@
-# Vision Parser Dependencies
+# Core Dependencies
 openai>=1.58.0          # Azure OpenAI / OpenAI API client
-pdf2image>=1.17.0       # PDF to image conversion
-Pillow>=10.0.0          # Image processing
+pydantic>=2.0.0         # Data validation and schema generation
 python-dotenv>=1.0.0    # Environment variable management
 
-# Docling Parser Dependencies
+# Vision Parser Dependencies
+PyMuPDF>=1.23.0         # PDF to image conversion (replaces pdf2image + poppler)
+Pillow>=10.0.0          # Image processing
+
+# Docling Parser Dependencies (Optional)
 docling                 # Docling document parser
 psutil                  # Memory management
 
-# PyMuPDF Parser Dependencies
-PyMuPDF                 # Fast PDF parsing (fitz)
-
-# DOCX Parser Dependencies
+# DOCX Parser Dependencies (Optional)
 python-docx             # Word document parsing
 
 # Optional: GPU acceleration for Docling Parser
@@ -19,7 +19,3 @@ python-docx             # Word document parsing
 
 # Optional: For OpenAI Agents SDK (experimental)
 # agents>=0.1.0
-
-# System dependencies (must be installed separately):
-# - poppler-utils (Linux: apt-get install poppler-utils)
-# - poppler (Windows: download from https://github.com/oschwartz10612/poppler-windows/releases)

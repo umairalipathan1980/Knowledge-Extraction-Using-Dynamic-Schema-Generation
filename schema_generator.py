@@ -31,13 +31,23 @@ from __future__ import annotations
 import os
 import re
 import time
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from datetime import datetime
-from typing import Annotated, Literal, Optional, List
-
-from dotenv import load_dotenv
+from typing import Annotated, Literal, Optional, List, Any, Dict, get_origin, get_args
 from openai import OpenAI, AzureOpenAI
 from openai import APIError, RateLimitError, APITimeoutError
+
+# Import shared configuration
+from extraction_config import get_openai_config, create_openai_client
+
+try:
+    # Pydantic v2 style config (preferred)
+    from pydantic import ConfigDict
+    _HAS_V2 = True
+except Exception:
+    _HAS_V2 = False
+
+
 from pydantic import (
     BaseModel,
     Field,
@@ -51,59 +61,11 @@ from pydantic import (
 # Setup
 # -----------------------------------------------------------------------------
 
-load_dotenv()
-
 SYSTEM_PARSER = (
     "You convert text into strictly structured data according to the provided schema. "
     "Never invent values. If uncertain or missing, return null. "
     "Do not include explanations or extra keys or extra fields."
 )
-
-
-def get_openai_config(use_azure: bool = True) -> dict:
-    """
-    Get OpenAI configuration based on whether to use Azure or standard OpenAI.
-
-    Args:
-        use_azure: If True, use Azure OpenAI. If False, use standard OpenAI API.
-
-    Returns:
-        Configuration dictionary with appropriate settings
-    """
-    if use_azure:
-        return {
-            'use_azure': True,
-            'api_key': os.getenv("AZURE_API_KEY"),
-            'azure_endpoint': os.getenv("AZURE_ENDPOINT", "https://haagahelia-poc-gaik.openai.azure.com"),
-            'api_version': os.getenv("AZURE_API_VERSION", "2024-12-01-preview"),
-            'model': os.getenv("AZURE_DEPLOYMENT_NAME", "gpt-4.1"),
-        }
-    else:
-        return {
-            'use_azure': False,
-            'api_key': os.getenv("OPENAI_API_KEY"),
-            'model': 'gpt-4.1-2025-04-14',
-        }
-
-
-def create_openai_client(config: dict):
-    """
-    Create an OpenAI or Azure OpenAI client based on configuration.
-
-    Args:
-        config: Configuration dictionary from get_openai_config()
-
-    Returns:
-        OpenAI or AzureOpenAI client instance
-    """
-    if config.get('use_azure', False):
-        return AzureOpenAI(
-            api_key=config['api_key'],
-            api_version=config['api_version'],
-            azure_endpoint=config['azure_endpoint'],
-        )
-    else:
-        return OpenAI(api_key=config['api_key'])
 
 # -----------------------------------------------------------------------------
 # Retry & call helpers
@@ -267,14 +229,14 @@ def parse_nested_requirements(
     *,
     client=None,
     model: str = None
-) -> tuple[type[BaseModel], ExtractionRequirements]:
+) -> tuple[type[BaseModel], ExtractionRequirements, StructureAnalysis]:
     """
     Stage 2: Parse nested requirements by:
     1. Detecting structure type
     2. Parsing item-level fields
     3. Creating nested parent model
 
-    Returns: (ParentModel, item_requirements)
+    Returns: (ParentModel, item_requirements, structure_analysis)
     """
     if client is None:
         config = get_openai_config(use_azure=True)
@@ -294,7 +256,7 @@ def parse_nested_requirements(
         print("  → Using flat structure")
         requirements = parse_user_requirements(user_description, client=client, model=model)
         extraction_model = create_extraction_model(requirements)
-        return extraction_model, requirements
+        return extraction_model, requirements, analysis
 
     # Nested structure
     print(f"  → Using nested structure with '{analysis.parent_container_name}' field")
@@ -329,7 +291,7 @@ def parse_nested_requirements(
     print(f"✓ Created nested model: {ParentModel.__name__}")
     print(f"  Container field: '{analysis.parent_container_name}' (List[{ItemModel.__name__}])")
 
-    return ParentModel, item_requirements
+    return ParentModel, item_requirements, analysis
 
 
 # -----------------------------------------------------------------------------
@@ -388,6 +350,9 @@ def sanitize_model_name(name: str, suffix: str = "") -> str:
     # Remove consecutive underscores
     s = re.sub(r"_+", "_", s).strip("_")
 
+    # Remove leading/trailing underscores
+    s = s.strip("_")
+
     # Remove suffix from name if it already exists (avoid duplication)
     if suffix and s.endswith(suffix.lstrip("_")):
         s = s[:-len(suffix.lstrip("_"))].rstrip("_")
@@ -399,21 +364,20 @@ def sanitize_model_name(name: str, suffix: str = "") -> str:
 
     return s if s else "Dynamic"
 
-
 def create_extraction_model(requirements: ExtractionRequirements) -> type[BaseModel]:
     """
     Create a Pydantic model dynamically from field specifications (strict).
     - Forbid extra/unknown keys.
     - Apply enums, regex patterns, and formats where applicable.
     """
-    # Base type mapping
+    # Map string type names to actual Python types
     base_types = {
         "str": str,
         "int": int,
         "float": float,
         "bool": bool,
         "list[str]": list[str],
-        "date": str,     # we'll normalize to ISO later
+        "date": str,
         "decimal": Decimal,
         "list[dict]": list[dict],  # for nested structures like items
     }
@@ -492,104 +456,95 @@ def _normalize_record(data: dict, req: ExtractionRequirements) -> dict:
             out[k] = v
     return out
 
+
 # -----------------------------------------------------------------------------
 # Helper: Pretty print Pydantic model schema
 # -----------------------------------------------------------------------------
 
 def print_pydantic_schema(model: type[BaseModel], title: str = "Generated Pydantic Schema") -> None:
     """
-    Print a formatted view of the Pydantic model schema.
-    Shows field names, types, whether they're required, and descriptions.
+    Print the exact Pydantic model as Python class definition.
+    For nested structures, prints both the inner model and outer container model.
     """
+    from typing import get_origin, get_args
+    import inspect
+
     print(f"\n{'='*80}")
     print(f"{title}")
-    print(f"{'='*80}")
-    print(f"Model Name: {model.__name__}")
-    if model.__doc__:
-        print(f"Description: {model.__doc__}")
+    print(f"{'='*80}\n")
 
-    print(f"\nFields:")
+    # Collect all models to print (handle nested structures)
+    models_to_print = []
+
+    # Check if this model has nested Pydantic models
+    for field_name, field_info in model.model_fields.items():
+        annotation = field_info.annotation
+
+        # Check for List[SomeModel] pattern
+        origin = get_origin(annotation)
+        if origin is list:
+            args = get_args(annotation)
+            if args and len(args) > 0:
+                inner_type = args[0]
+                # Check if it's a Pydantic model
+                if inspect.isclass(inner_type) and issubclass(inner_type, BaseModel):
+                    models_to_print.append(inner_type)
+
+    # Print inner models first
+    for inner_model in models_to_print:
+        _print_single_model(inner_model)
+        print()
+
+    # Print the main model
+    _print_single_model(model)
+
+    print(f"\n{'='*80}\n")
+
+
+def _print_single_model(model: type[BaseModel]) -> None:
+    """Helper to print a single Pydantic model."""
+    # Class definition
+    print(f"class {model.__name__}(BaseModel):")
+
+    # Docstring
+    if model.__doc__:
+        print(f'    """{model.__doc__}"""')
+
+    # Config
+    if hasattr(model, 'model_config'):
+        config = model.model_config
+        if config.get('extra') == 'forbid':
+            print(f"    model_config = ConfigDict(extra='forbid')")
+
+    print()
+
+    # Fields
     for field_name, field_info in model.model_fields.items():
         # Get type annotation
         annotation = field_info.annotation
-        type_str = str(annotation).replace("typing.", "")
+        type_str = str(annotation).replace("typing.", "").replace("<class '", "").replace("'>", "")
+
+        # Clean up the type string for better readability
+        type_str = type_str.replace("schema_generator.", "")
 
         # Check if required
         is_required = field_info.is_required()
-        required_str = "required" if is_required else "optional"
 
         # Get description
-        description = field_info.description or "(no description)"
+        description = field_info.description
 
-        print(f"  • {field_name}")
-        print(f"    Type: {type_str}")
-        print(f"    Required: {required_str}")
-        print(f"    Description: {description}")
+        # Build field definition
+        if is_required:
+            if description:
+                print(f'    {field_name}: {type_str} = Field(description="{description}")')
+            else:
+                print(f'    {field_name}: {type_str}')
+        else:
+            if description:
+                print(f'    {field_name}: {type_str} = Field(None, description="{description}")')
+            else:
+                print(f'    {field_name}: {type_str} = None')
 
-    # Also print JSON schema for full detail
-    print(f"\n{'-'*80}")
-    print("JSON Schema:")
-    print(f"{'-'*80}")
-    import json
-    schema = model.model_json_schema()
-    print(json.dumps(schema, indent=2))
-    print(f"{'='*80}\n")
-
-
-# -----------------------------------------------------------------------------
-# Extract data using the dynamic schema with structured outputs
-# -----------------------------------------------------------------------------
-
-def _schema_hint(req: ExtractionRequirements) -> str:
-    lines = []
-    for f in req.fields:
-        opt = "required" if f.required else "optional"
-        extras = []
-        if f.enum: extras.append(f"enum={f.enum}")
-        if f.pattern: extras.append(f"pattern={f.pattern}")
-        if f.format: extras.append(f"format={f.format}")
-        line = f"- {f.field_name}: {f.field_type}, {opt}"
-        if extras:
-            line += f" ({', '.join(extras)})"
-        lines.append(line)
-    return "\n".join(lines)
-
-
-def extract_from_document(
-    document_text: str,
-    extraction_model: type[BaseModel],
-    req: ExtractionRequirements,
-    *,
-    client=None,
-    model: str = None,
-) -> BaseModel:
-    """
-    Use structured outputs to extract according to `extraction_model`.
-    """
-    if client is None:
-        config = get_openai_config(use_azure=True)
-        client = create_openai_client(config)
-        model = model if model else config['model']
-    elif model is None:
-        raise ValueError("model must be provided when client is specified")
-
-    schema_hint = _schema_hint(req)
-    messages = [
-        {"role": "system", "content": SYSTEM_PARSER},
-        {
-            "role": "user",
-            "content": (
-                f"Extract only the specified fields per the schema below.\n"
-                f"If a value is missing or uncertain, return null.\n\n"
-                f"Schema:\n{schema_hint}\n\n"
-                f"Document:\n```txt\n{document_text}\n```"
-            ),
-        },
-    ]
-    resp = _parse_with(client=client, model=model, messages=messages, response_format=extraction_model)
-    if getattr(resp, "usage", None):
-        print(f"[extract_from_document] tokens={resp.usage.total_tokens}")
-    return resp.choices[0].message.parsed
 
 # -----------------------------------------------------------------------------
 # REUSABLE CLASS INTERFACE
@@ -597,45 +552,44 @@ def extract_from_document(
 
 class SchemaGenerator:
     """
-    Schema generator for dynamic data extraction from documents.
+    Generates Pydantic schemas from natural language requirements.
 
     Automatically detects nested vs flat data structures and generates
-    appropriate Pydantic models from natural language requirements.
+    appropriate Pydantic models for structured data extraction.
 
     Features:
     - Smart structure detection (flat vs nested)
     - Type-safe Pydantic model generation
     - Support for Azure OpenAI and OpenAI
-    - Deterministic extraction with retries
-    - Export to JSON and CSV
+    - Field specification parsing (types, enums, patterns)
 
     Usage:
-        # Initialize with Azure OpenAI (default)
-        generator = SchemaGenerator(use_azure=True)
+        # Create config once
+        config = get_openai_config(use_azure=True)  # or use_azure=False for standard OpenAI
 
-        # Or with standard OpenAI
-        generator = SchemaGenerator(use_azure=False)
+        # Initialize with config
+        generator = SchemaGenerator(config=config)
 
-        # Extract data
-        results = generator.extract(
-            user_requirements="Extract invoice number and amount...",
-            documents=["document text 1", "document text 2"]
+        # Generate schema from requirements
+        schema = generator.generate_schema(
+            user_requirements="Extract invoice number, amount, and date..."
         )
 
-        # Extract and save to files
-        results = generator.extract_to_files(
-            user_requirements="...",
-            documents=["..."],
-            json_path="output.json",
-            csv_path="output.csv"
-        )
+        # Access generated models and requirements
+        print(generator.extraction_model)
+        print(generator.item_requirements)
+        print(generator.get_schema_info())
     """
 
-    def __init__(self, use_azure: bool = True, model: Optional[str] = None):
+    def __init__(self, config: dict, model: Optional[str] = None):
         """
         Initialize the SchemaGenerator.
+
+        Args:
+            config: OpenAI configuration dict from get_openai_config()
+            model: Optional model name override
         """
-        self.config = get_openai_config(use_azure=use_azure)
+        self.config = config
         self.model = model if model else self.config['model']
         self.client = create_openai_client(self.config)
         self.extraction_model = None
@@ -666,177 +620,19 @@ class SchemaGenerator:
             Generated Pydantic model class (nested or flat)
         """
         print("Generating schema from requirements...")
-        self.extraction_model, self.item_requirements = parse_nested_requirements(
+        self.extraction_model, self.item_requirements, self.structure_analysis = parse_nested_requirements(
             user_requirements,
             client=self.client,
             model=self.model
         )
-        return self.extraction_model
 
-    def extract(
-        self,
-        user_requirements: str,
-        documents: list[str],
-        print_schema: bool = True
-    ) -> list[dict]:
-        """
-        Complete extraction workflow: generate schema and extract data.
-
-        Args:
-            user_requirements: Natural language description of extraction task
-            documents: List of document texts to extract from
-            print_schema: Whether to print the generated schema (default: True)
-
-        Returns:
-            List of extraction results (dicts)
-        """
-        print("="*80)
-        print("SMART EXTRACTION WORKFLOW")
-        print("="*80)
-
-        # Stage 1: Detect structure type and store analysis
-        print("Analyzing structure type...")
-        self.structure_analysis = detect_structure_type(user_requirements, client=self.client, model=self.model)
-        print(f"✓ Structure type: {self.structure_analysis.structure_type}")
-        print(f"  Reasoning: {self.structure_analysis.reasoning}")
-
-        # Stage 2: Parse requirements and create model (populate instance variables)
-        if self.structure_analysis.structure_type == "flat":
-            print("  → Using flat structure")
-            self.item_requirements = parse_user_requirements(user_requirements, client=self.client, model=self.model)
-            self.extraction_model = create_extraction_model(self.item_requirements)
-        else:
-            # Nested structure
-            print(f"  → Using nested structure with '{self.structure_analysis.parent_container_name}' field")
-            print(f"  Parent: {self.structure_analysis.parent_description}")
-
-            print("\nParsing item-level fields...")
-            self.item_requirements = parse_user_requirements(self.structure_analysis.item_description, client=self.client, model=self.model)
-
-            print(f"✓ Identified {len(self.item_requirements.fields)} fields per item")
-            print(f"  Fields: {[f.field_name for f in self.item_requirements.fields]}")
-
-            print("\nCreating nested Pydantic model...")
-            ItemModel = create_extraction_model(self.item_requirements)
-
-            from typing import List
-            suffix = "_Collection"
-            base_name = sanitize_model_name(self.item_requirements.use_case_name, suffix=suffix)
-            model_name = base_name + suffix
-
-            self.extraction_model = create_model(
-                model_name,
-                __config__=ConfigDict(extra="forbid"),
-                __doc__=f"Collection of {self.item_requirements.use_case_name} items",
-                **{
-                    self.structure_analysis.parent_container_name: (
-                        List[ItemModel],
-                        Field(description=self.structure_analysis.parent_description)
-                    )
-                }
-            )
-
-            print(f"✓ Created nested model: {self.extraction_model.__name__}")
-            print(f"  Container field: '{self.structure_analysis.parent_container_name}' (List[{ItemModel.__name__}])")
-
-        # Print the generated model if requested
-        if print_schema:
-            print("\n" + "="*80)
-            print("GENERATED PYDANTIC MODEL")
-            print("="*80)
-            print_pydantic_schema(self.extraction_model, title="Extraction Schema")
-
-        # Stage 3: Extract from documents
+        # Print the generated Pydantic model
         print("\n" + "="*80)
-        print("EXTRACTION PHASE")
+        print("GENERATED PYDANTIC MODEL")
         print("="*80)
-        results: list[dict] = []
+        print_pydantic_schema(self.extraction_model, title="Extraction Schema")
 
-        for i, doc in enumerate(documents, start=1):
-            print(f"\nProcessing document {i}/{len(documents)}...")
-
-            # Build extraction prompt with context about structure
-            schema_hint = _schema_hint(self.item_requirements)
-
-            messages = [
-                {"role": "system", "content": SYSTEM_PARSER},
-                {
-                    "role": "user",
-                    "content": (
-                        f"EXTRACTION TASK:\n{user_requirements}\n\n"
-                        f"Extract data according to the schema below.\n"
-                        f"If extracting multiple items, ensure ALL items are included in the result.\n\n"
-                        f"Schema fields:\n{schema_hint}\n\n"
-                        f"Document:\n```txt\n{doc}\n```"
-                    ),
-                },
-            ]
-
-            resp = _parse_with(client=self.client, model=self.model, messages=messages, response_format=self.extraction_model)
-            if getattr(resp, "usage", None):
-                print(f"  [extraction] tokens={resp.usage.total_tokens}")
-
-            parsed = resp.choices[0].message.parsed
-            result_dict = parsed.model_dump()
-
-            # Normalize nested items if present
-            if isinstance(result_dict, dict):
-                for key, value in result_dict.items():
-                    if isinstance(value, list) and len(value) > 0 and isinstance(value[0], dict):
-                        # Normalize each item in the list
-                        normalized_items = [_normalize_record(item, self.item_requirements) for item in value]
-                        result_dict[key] = normalized_items
-                        print(f"  ✓ Extracted {len(normalized_items)} items")
-
-            results.append(result_dict)
-
-        print(f"\n✓ Completed extraction from {len(documents)} document(s)")
-        return results
-
-    def extract_to_files(
-        self,
-        user_requirements: str,
-        documents: list[str],
-        json_path: str = "extraction_results.json",
-        csv_path: str = "extraction_results.csv"
-    ) -> list[dict]:
-        """
-        Extract data and save to JSON and CSV files.
-
-        Args:
-            user_requirements: Natural language description of extraction task
-            documents: List of document texts to extract from
-            json_path: Output JSON file path
-            csv_path: Output CSV file path
-
-        Returns:
-            List of extraction results (dicts)
-        """
-        results = self.extract(user_requirements, documents)
-
-        # Save to JSON
-        import json
-        with open(json_path, 'w', encoding='utf-8') as f:
-            json.dump(results, f, indent=2, default=str)
-        print(f"\n✓ Results saved to: {json_path}")
-
-        # Save to CSV if nested structure
-        try:
-            import csv
-            if results and isinstance(results[0], dict):
-                for result in results:
-                    for key, value in result.items():
-                        if isinstance(value, list) and len(value) > 0 and isinstance(value[0], dict):
-                            with open(csv_path, 'w', encoding='utf-8', newline='') as f:
-                                writer = csv.DictWriter(f, fieldnames=value[0].keys())
-                                writer.writeheader()
-                                writer.writerows(value)
-                            print(f"✓ Items saved to CSV: {csv_path}")
-                            break
-        except Exception as e:
-            print(f"Note: Could not save CSV: {e}")
-
-        return results
+        return self.extraction_model
 
     def get_schema_info(self) -> dict:
         """

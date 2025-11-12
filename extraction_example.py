@@ -2,7 +2,9 @@
 # EXAMPLE USAGE
 # -----------------------------------------------------------------------------
 
+from extraction_config import get_openai_config
 from schema_generator import SchemaGenerator
+from data_extractor import DataExtractor
 
 
 if __name__ == "__main__":
@@ -10,6 +12,10 @@ if __name__ == "__main__":
     print("="*80)
     print("SCHEMA GENERATOR - EXAMPLE USAGE")
     print("="*80)
+
+    # Configure OpenAI client (Azure or standard OpenAI)
+    # Set use_azure=True for Azure OpenAI, or use_azure=False for standard OpenAI
+    config = get_openai_config(use_azure=True)
 
     # Example: Extract project information
     user_requirements = """
@@ -26,7 +32,7 @@ if __name__ == "__main__":
     sample_document = [
         """
         Project Report
-        
+
         Title: Advanced AI Research Initiative
         Acronym: AIRI
         Lead Institution: University of Helsinki
@@ -37,7 +43,7 @@ if __name__ == "__main__":
         """,
         """
         Project Summary
-        
+
         Project Name: Green Energy Solutions
         Short Name: GES
         Lead: Technical University of Munich
@@ -47,19 +53,30 @@ if __name__ == "__main__":
         Started: 2023-06-01
         """,
     ]
-    # Create generator and extract
-    # Use Azure OpenAI with default deployment 'gpt-4.1'
-    generator = SchemaGenerator(use_azure=True)
 
-    # Or use standard OpenAI:
-    # generator = SchemaGenerator(use_azure=False)
+    # Step 1: Generate schema
+    generator = SchemaGenerator(config=config)
 
-    print("\nUsing SchemaGenerator class for extraction...")
+    print("\nStep 1: Generating schema...")
     print("-" * 80)
 
-    results = generator.extract(
+    schema = generator.generate_schema(user_requirements=user_requirements)
+    print(f"\n✓ Generated schema: {schema.__name__}")
+    print(f"  Structure: {generator.structure_analysis.structure_type}")
+    print(f"  Fields: {[f.field_name for f in generator.item_requirements.fields]}")
+
+    # Step 2: Extract data using generated schema
+    print("\nStep 2: Extracting data...")
+    print("-" * 80)
+
+    extractor = DataExtractor(config=config)
+    results = extractor.extract(
+        extraction_model=schema,
+        requirements=generator.item_requirements,
         user_requirements=user_requirements,
-        documents=sample_document  # Already a list, don't wrap again
+        documents=sample_document,
+        save_json=True,
+        json_path="extraction_results.json"
     )
 
     # Display results

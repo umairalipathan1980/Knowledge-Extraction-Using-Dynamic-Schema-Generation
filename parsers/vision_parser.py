@@ -1,45 +1,13 @@
 import os
 import base64
-import platform
-import shutil
-from pathlib import Path
 from io import BytesIO
 from typing import List, Optional
 from dotenv import load_dotenv
 from openai import AzureOpenAI, OpenAI
-from pdf2image import convert_from_path
 from PIL import Image
-import glob
+import fitz  # PyMuPDF for PDF processing
 
 load_dotenv()
-
-
-def detect_poppler_path() -> Optional[str]:
-    system = platform.system()
-
-    # On Linux/macOS, if pdfinfo is on PATH, no need to return a path
-    if system in ["Linux", "Darwin"] and shutil.which("pdfinfo"):
-        return None
-
-    if system == "Windows":
-        candidates = []
-        for root in [
-            str(Path.home()),
-            r"C:\Program Files",
-            "C:\\",  # do NOT use r"C:\"
-        ]:
-            candidates += glob.glob(os.path.join(root, "poppler*", "Library", "bin"))
-            candidates += glob.glob(os.path.join(root, "poppler*", "bin"))
-
-        for p in candidates:
-            pdfinfo = Path(p) / "pdfinfo.exe"
-            if pdfinfo.exists():
-                return p
-
-    raise RuntimeError(
-        "Poppler not found. Install via Chocolatey: `choco install poppler` "
-        "or set `poppler_path` explicitly."
-    )
 
 def get_openai_config(use_azure: bool = True) -> dict:
     """
@@ -106,45 +74,32 @@ Return ONLY the markdown content, no explanations.
         self,
         openai_config: dict,
         custom_prompt: str = None,
-        poppler_path: str = None,
         use_context: bool = True,
         dpi: int = 300,
         clean_output: bool = True
     ):
-        # """
-        # Initialize the VisionParser with all configuration options.
+        """
+        Initialize the VisionParser with all configuration options.
 
-        # Args:
-        #     openai_config: Dictionary containing OpenAI configuration
-        #         For Azure:
-        #             - use_azure: True
-        #             - api_key: Azure OpenAI API key
-        #             - azure_endpoint: Azure OpenAI endpoint URL
-        #             - api_version: API version
-        #             - model: Deployment name
-        #         For Standard OpenAI:
-        #             - use_azure: False
-        #             - api_key: OpenAI API key
-        #             - model: Model name (e.g., 'gpt-4o-2024-11-20')
-        #     custom_prompt: Optional custom instructions for the vision model (uses DEFAULT_TABLE_PROMPT if None)
-        #     poppler_path: Optional path to poppler bin directory. If None, will attempt auto-detection.
-        #                   (e.g., r"C:\Users\h02317\poppler-25.07.0\Library\bin")
-        #     use_context: Whether to provide previous page context for multi-page documents (default: True)
-        #     dpi: Image resolution for PDF conversion (default: 200)
-        #     clean_output: Enable LLM post-processing to clean and merge tables (default: True)
-        # """
+        Args:
+            openai_config: Dictionary containing OpenAI configuration
+                For Azure:
+                    - use_azure: True
+                    - api_key: Azure OpenAI API key
+                    - azure_endpoint: Azure OpenAI endpoint URL
+                    - api_version: API version
+                    - model: Deployment name
+                For Standard OpenAI:
+                    - use_azure: False
+                    - api_key: OpenAI API key
+                    - model: Model name (e.g., 'gpt-4o-2024-11-20')
+            custom_prompt: Optional custom instructions for the vision model (uses DEFAULT_TABLE_PROMPT if None)
+            use_context: Whether to provide previous page context for multi-page documents (default: True)
+            dpi: Image resolution for PDF conversion (default: 300)
+            clean_output: Enable LLM post-processing to clean and merge tables (default: True)
+        """
         self.config = openai_config
         self.custom_prompt = custom_prompt or self._get_default_prompt()
-
-        # Auto-detect poppler path if not provided
-        if poppler_path is None:
-            detected_path = detect_poppler_path()
-            self.poppler_path = detected_path
-            if detected_path:
-                print(f"Auto-detected poppler at: {detected_path}")
-        else:
-            self.poppler_path = poppler_path
-
         self.use_context = use_context
         self.dpi = dpi
         self.clean_output = clean_output
@@ -197,17 +152,32 @@ Return ONLY the markdown content, no explanations.
 
     def _pdf_to_images(self, pdf_path: str, dpi: int = 300) -> List[Image.Image]:
         """
-        Convert PDF pages to images.
+        Convert PDF pages to images using PyMuPDF (fitz).
+        Images are kept in memory as PIL Image objects.
 
         Args:
             pdf_path: Path to the PDF file
-            dpi: Resolution for image conversion (default: 200)
+            dpi: Resolution for image conversion (default: 300)
 
         Returns:
             List of PIL Image objects
         """
-        print(f"Converting PDF to images (DPI: {dpi})...")
-        images = convert_from_path(pdf_path, dpi=dpi, poppler_path=self.poppler_path)
+        print(f"Converting PDF to images using PyMuPDF (DPI: {dpi})...")
+        images = []
+        doc = fitz.open(pdf_path)  # Open the PDF
+
+        # Calculate zoom factor from DPI (72 is the default DPI in PDFs)
+        zoom = dpi / 72
+        mat = fitz.Matrix(zoom, zoom)
+
+        for page_num in range(len(doc)):
+            # Render page to pixmap with specified DPI
+            pix = doc[page_num].get_pixmap(matrix=mat)
+            # Convert to PIL Image
+            img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+            images.append(img)
+
+        doc.close()
         print(f"Converted {len(images)} pages to images")
         return images
 
@@ -224,6 +194,14 @@ Return ONLY the markdown content, no explanations.
         buffered = BytesIO()
         image.save(buffered, format="PNG")
         return base64.b64encode(buffered.getvalue()).decode('utf-8')
+
+    ##compress before encoding
+    # def _image_to_base64(self, image: Image.Image) -> str:
+    #     buffered = BytesIO()
+    #     # Reduce quality/size while preserving readability
+    #     image = image.resize((int(image.width * 0.8), int(image.height * 0.8)), Image.LANCZOS)
+    #     image.save(buffered, format="JPEG", quality=85, optimize=True)
+    #     return base64.b64encode(buffered.getvalue()).decode('utf-8')
 
     def _parse_image_with_vision(self, image: Image.Image, page_num: int, previous_context: str = None) -> str:
         """
@@ -397,82 +375,6 @@ OUTPUT: Return ONLY the cleaned, merged markdown. No explanations, no code block
             f.write(combined_markdown)
 
         print(f"Markdown saved to: {output_path}")
-
-
-def parse_pdf(
-    pdf_path: str,
-    use_azure: bool = True,
-    custom_prompt: str = None,
-    poppler_path: str = None,
-    clean_output: bool = True,
-    dpi: int = 300,
-    use_context: bool = True,
-    output_path: str = None,
-    print_output: bool = False
-) -> List[str]:
-    """
-    Convenience function to parse a PDF with minimal setup.
-
-    Args:
-        pdf_path: Path to the PDF file
-        use_azure: Whether to use Azure OpenAI (True) or standard OpenAI (False)
-        custom_prompt: Custom parsing instructions (uses VisionParser.DEFAULT_TABLE_PROMPT if None)
-        poppler_path: Optional path to poppler bin directory (auto-detected if None)
-        clean_output: Enable LLM post-processing to clean and merge tables
-        dpi: Image resolution for PDF conversion
-        use_context: Whether to provide previous page context
-        output_path: Where to save the markdown file (optional)
-        print_output: Whether to print the parsed markdown to console
-
-    Returns:
-        List of markdown strings (single item if clean_output=True)
-
-    Example:
-        >>> from vision_parser import parse_pdf
-        >>> markdown = parse_pdf("document.pdf", use_azure=True)
-        >>> print(markdown[0])
-    """
-    # Get configuration
-    config = get_openai_config(use_azure=use_azure)
-
-    # Initialize parser with all options
-    parser = VisionParser(
-        openai_config=config,
-        custom_prompt=custom_prompt or VisionParser.DEFAULT_TABLE_PROMPT,
-        poppler_path=poppler_path,
-        use_context=use_context,
-        dpi=dpi,
-        clean_output=clean_output
-    )
-
-    # Convert PDF to markdown
-    markdown_pages = parser.convert_pdf(pdf_path)
-
-    # Print if requested
-    if print_output:
-        if len(markdown_pages) == 1:
-            print(f"\n{'='*80}")
-            print(f"CLEANED AND MERGED OUTPUT")
-            print(f"{'='*80}\n")
-            print(markdown_pages[0])
-            print(f"\n{'='*80}")
-            print(f"END OF OUTPUT")
-            print(f"{'='*80}\n")
-        else:
-            for i, page_content in enumerate(markdown_pages, 1):
-                print(f"\n{'='*80}")
-                print(f"PAGE {i}")
-                print(f"{'='*80}\n")
-                print(page_content)
-                print(f"\n{'='*80}")
-                print(f"END OF PAGE {i}")
-                print(f"{'='*80}\n")
-
-    # Save if output path provided
-    if output_path:
-        parser.save_markdown(markdown_pages, output_path)
-
-    return markdown_pages
 
 
 
