@@ -22,7 +22,12 @@ graph TB
     PDF -->|Yes| Parser[VisionParser<br/>PDF → Markdown]
     PDF -->|No| TextDoc[Text Documents]
 
-    Parser --> Markdown[Markdown Content]
+    Parser --> Clean{Clean<br/>Markdown?}
+
+    Clean -->|Yes| CleanLLM[Clean Markdown with LLM<br/>Merge tables & remove artifacts]
+    Clean -->|No| Markdown[Markdown Content]
+
+    CleanLLM --> Markdown
     TextDoc --> DocInput[Document Content]
     Markdown --> DocInput
 
@@ -48,6 +53,7 @@ graph TB
     style Start fill:#e1f5e1
     style Config fill:#e3f2fd
     style Parser fill:#fff3e0
+    style CleanLLM fill:#ffe0b2
     style SchemaGen fill:#f3e5f5
     style Extract fill:#fce4ec
     style End fill:#e1f5e1
