@@ -14,6 +14,7 @@ Extract structured data from documents using natural language requirements. Auto
 ## Workflow
 
 ```mermaid
+%%{init: {'theme':'base', 'themeVariables': { 'fontSize':'11px'}, 'flowchart':{'nodeSpacing': 30, 'rankSpacing': 40}}}%%
 graph TB
     Start([User Provides Requirements]) --> Config[Configure OpenAI<br/>get_openai_config]
 
