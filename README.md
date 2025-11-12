@@ -17,7 +17,7 @@ Extract structured data from documents using natural language requirements. Auto
 graph TB
     Start([User Provides Requirements]) --> Config[Configure OpenAI<br/>get_openai_config]
 
-    Config --> PDF{Process<br/>PDF?}
+    Config --> PDF{Vision<br/>Parsing?}
 
     PDF -->|Yes| Parser[VisionParser<br/>PDF → Markdown]
     PDF -->|No| TextDoc[Text Documents]
