@@ -2,8 +2,6 @@
 
 Extract structured data from documents using natural language requirements. Automatically generates Pydantic schemas and validates extracted data.
 
-**[View Workflow Diagram →](WORKFLOW.md)**
-
 ## Features
 
 - **Natural Language → Schema**: Describe extraction needs in plain English
@@ -12,6 +10,49 @@ Extract structured data from documents using natural language requirements. Auto
 - **Modular Architecture**: Separate schema generation and data extraction
 - **Multi-Provider Support**: Works with Azure OpenAI and standard OpenAI
 - **PDF Processing**: Built-in PDF to markdown conversion using PyMuPDF
+
+## Workflow
+
+```mermaid
+graph TB
+    Start([User Provides Requirements]) --> Config[Configure OpenAI<br/>get_openai_config]
+
+    Config --> PDF{Process<br/>PDF?}
+
+    PDF -->|Yes| Parser[VisionParser<br/>PDF → Markdown]
+    PDF -->|No| TextDoc[Text Documents]
+
+    Parser --> Markdown[Markdown Content]
+    TextDoc --> DocInput[Document Content]
+    Markdown --> DocInput
+
+    DocInput --> SchemaGen[SchemaGenerator<br/>Generate Pydantic Schema]
+
+    SchemaGen --> Detect{Structure<br/>Detection}
+    Detect -->|Flat| FlatSchema[Flat Schema<br/>One record per doc]
+    Detect -->|Nested| NestedSchema[Nested Schema<br/>Multiple items per doc]
+
+    FlatSchema --> Extract[DataExtractor<br/>Extract Structured Data]
+    NestedSchema --> Extract
+
+    Extract --> Validate[Pydantic Validation<br/>Type checking & normalization]
+
+    Validate --> Output{Save<br/>JSON?}
+
+    Output -->|Yes| JSON[JSON File<br/>extraction_results.json]
+    Output -->|No| Results[Python Dictionary<br/>List of Records]
+
+    JSON --> End([Structured Data Ready])
+    Results --> End
+
+    style Start fill:#e1f5e1
+    style Config fill:#e3f2fd
+    style Parser fill:#fff3e0
+    style SchemaGen fill:#f3e5f5
+    style Extract fill:#fce4ec
+    style End fill:#e1f5e1
+    style Validate fill:#e8f5e9
+```
 
 ## Installation
 
