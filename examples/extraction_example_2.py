@@ -11,13 +11,11 @@ import sys
 from pathlib import Path
 from typing import Tuple
 
-# Add parent directory to path to import vision_parser module
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# Add src directory to path to import modules (works without pip install)
+sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from schema_generator import SchemaGenerator
-from data_extractor import DataExtractor
-from extraction_config import get_openai_config
-from parsers.vision_parser import VisionParser
+from extractors import SchemaGenerator, DataExtractor, get_openai_config
+from extractors.parsers import VisionParser
 
 try:
     # Optional imports; only needed if classify_document() constructs its own client
@@ -129,10 +127,10 @@ def main():
 
     # 3) PDFs to process
     pdf_paths = [
-        "input/PO_4512560923.pdf",
-        "input/3AFP201773305A-BOM.pdf",
-        "input/3AFP201773267A-BOM.pdf",
-        "input/3AFP201773229A-BOM.pdf",
+        "input/PO.pdf",
+        "input/BOM1.pdf",
+        "input/BOM12.pdf",
+        "input/BOM13.pdf",
     ]
 
     # 4) Optional: build a combined output too

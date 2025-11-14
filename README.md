@@ -8,8 +8,6 @@ Extract structured data from documents using natural language requirements. Auto
 - **Auto Structure Detection**: Automatically detects flat vs nested data patterns
 - **Type-Safe Extraction**: Pydantic validation with structured outputs
 - **Modular Architecture**: Separate schema generation and data extraction
-- **Multi-Provider Support**: Works with Azure OpenAI and standard OpenAI
-- **PDF Processing**: Built-in PDF to markdown conversion using PyMuPDF
 
 ## Workflow
 
@@ -64,8 +62,11 @@ graph TB
 ## Installation
 
 ```bash
-# Install dependencies
-pip install -r requirements.txt
+# Install the package in editable mode (for development)
+pip install -e .
+
+# Or install from source
+pip install .
 
 # Configure environment
 cp .env.example .env
@@ -89,9 +90,7 @@ OPENAI_API_KEY=your_openai_key_here
 ### Basic Extraction
 
 ```python
-from extraction_config import get_openai_config
-from schema_generator import SchemaGenerator
-from data_extractor import DataExtractor
+from extractors import get_openai_config, SchemaGenerator, DataExtractor
 
 # Step 1: Configure OpenAI client (choose Azure or standard OpenAI)
 config = get_openai_config(use_azure=True)  # Set to False for standard OpenAI
@@ -145,11 +144,11 @@ results = extractor.extract(
 )
 ```
 
-### PDF Processing
+### PDF Processing With LLM-Based Vision Parsing
 
 ```python
-from extraction_config import get_openai_config
-from parsers.vision_parser import VisionParser
+from extractors import get_openai_config
+from extractors.parsers import VisionParser
 
 # Configure parser
 config = get_openai_config(use_azure=True)
@@ -178,7 +177,7 @@ results = extractor.extract(
 ### Azure OpenAI
 
 ```python
-from extraction_config import get_openai_config
+from extractors import get_openai_config
 
 # Default configuration
 config = get_openai_config(use_azure=True)
@@ -197,7 +196,8 @@ Configuration includes:
 ### Standard OpenAI
 
 ```python
-from extraction_config import get_openai_config
+from extractors import get_openai_config, SchemaGenerator, DataExtractor
+from extractors.parsers import VisionParser
 
 # Switch to standard OpenAI
 config = get_openai_config(use_azure=False)
@@ -216,23 +216,32 @@ Configuration includes:
 
 ```python
 # Override model for specific component
-generator = SchemaGenerator(config=config, model="gpt-4o")
-extractor = DataExtractor(config=config, model="gpt-4o-mini")
+generator = SchemaGenerator(config=config, model="gpt-4.1-2025-04-14")
+extractor = DataExtractor(config=config, model="gpt-4.1-2025-04-14")
 ```
 
 ## Project Structure
 
 ```
 extractors/
-├── extraction_config.py      # Shared OpenAI configuration
-├── schema_generator.py       # Dynamic schema generation
-├── data_extractor.py         # Data extraction engine
-├── extraction_example.py     # Usage example
-├── extractor.py              # Complete PO+BOM pipeline
-├── parsers/
-│   ├── vision_parser.py      # PDF → Markdown (PyMuPDF + Vision API)
-│   ├── pymupdf_parser.py     # Fast text-based PDF parser
-│   └── docling_parser.py     # Alternative parser
+├── pyproject.toml            # Package configuration
+├── README.md                 # Documentation
+├── requirements.txt          # Dependencies (legacy)
+├── src/
+│   └── extractors/           # Main package
+│       ├── __init__.py       # Package exports
+│       ├── config.py         # Shared OpenAI configuration
+│       ├── schema.py         # Dynamic schema generation
+│       ├── extractor.py      # Data extraction engine
+│       └── parsers/          # Document parsers
+│           ├── __init__.py   # Parser exports
+│           ├── vision.py     # PDF → Markdown (PyMuPDF + Vision API)
+│           ├── pymupdf.py    # Fast text-based PDF parser
+│           ├── docling.py    # Alternative parser (optional)
+│           └── docx.py       # Word document parser (optional)
+├── examples/                 # Usage examples
+│   ├── extraction_example_1.py  # Basic extraction example
+│   └── extraction_example_2.py  # Complete PO+BOM example
 └── input/                    # Input documents
 ```
 
@@ -243,8 +252,7 @@ extractors/
 Generates Pydantic schemas from natural language requirements.
 
 ```python
-from extraction_config import get_openai_config
-from schema_generator import SchemaGenerator
+from extractors import get_openai_config, SchemaGenerator
 
 config = get_openai_config(use_azure=True)
 generator = SchemaGenerator(config=config)
@@ -265,8 +273,7 @@ print(generator.structure_analysis)    # Flat vs nested detection
 Extracts structured data using pre-generated schemas.
 
 ```python
-from extraction_config import get_openai_config
-from data_extractor import DataExtractor
+from extractors import get_openai_config, DataExtractor
 
 config = get_openai_config(use_azure=True)
 extractor = DataExtractor(config=config)
@@ -287,8 +294,8 @@ results = extractor.extract(
 Converts PDFs to markdown using Vision API.
 
 ```python
-from extraction_config import get_openai_config
-from parsers.vision_parser import VisionParser
+from extractors import get_openai_config
+from extractors.parsers import VisionParser
 
 config = get_openai_config(use_azure=True)
 parser = VisionParser(
@@ -359,15 +366,11 @@ Extract:
 """
 ```
 
-## Advanced Usage
-
-### Complete Workflow
+## Complete Workflow
 
 ```python
-from extraction_config import get_openai_config
-from schema_generator import SchemaGenerator
-from data_extractor import DataExtractor
-from parsers.vision_parser import VisionParser
+from extractors import get_openai_config, SchemaGenerator, DataExtractor
+from extractors.parsers import VisionParser
 
 # 1. Configure (once for all components)
 config = get_openai_config(use_azure=True)
@@ -389,151 +392,22 @@ schema = generator.generate_schema(
     """
 )
 
-# 4. Extract structured data
-extractor = DataExtractor(config=config)
-results = extractor.extract(
-    extraction_model=schema,
-    requirements=generator.item_requirements,
-    user_requirements="...",
-    documents=markdown_docs,
-    save_json=True,
-    json_path="invoice_data.json"
-)
-
-# 5. Use results
-for record in results:
-    print(f"Item: {record['item_number']} - {record['description']}")
-    print(f"Total: {record['total']}")
-```
-
-### Batch Processing
-
-```python
-import os
-from pathlib import Path
-
-# Configure once
-config = get_openai_config(use_azure=True)
-parser = VisionParser(openai_config=config)
-generator = SchemaGenerator(config=config)
-extractor = DataExtractor(config=config)
-
-# Generate schema once
-schema = generator.generate_schema(user_requirements=requirements)
-
-# Process multiple PDFs
-pdf_folder = Path("input/")
-for pdf_file in pdf_folder.glob("*.pdf"):
-    print(f"Processing {pdf_file.name}...")
-
-    # Parse
-    markdown = parser.convert_pdf(str(pdf_file))
-
-    # Extract
-    results = extractor.extract(
-        extraction_model=schema,
-        requirements=generator.item_requirements,
-        user_requirements=requirements,
-        documents=markdown,
-        save_json=True,
-        json_path=f"output/{pdf_file.stem}_data.json"
-    )
-```
-
-### Custom Prompts for PDF Parsing
-
-```python
-custom_prompt = """
-Convert this document to markdown.
-Focus on:
-1. Preserve all table data exactly as shown
-2. Keep numerical values precise
-3. Maintain document structure
-4. Do not hallucinate or invent content
-"""
-
-parser = VisionParser(
-    openai_config=config,
-    custom_prompt=custom_prompt,
-    dpi=300
-)
-```
-
 ## Examples
 
-Complete examples available:
-- **extraction_example.py** - Basic schema generation and extraction
-- **extractor.py** - Complete PO+BOM matching pipeline with PDF parsing
+Complete examples available in the `examples/` folder:
+- **examples/extraction_example_1.py** - Basic schema generation and extraction
+- **examples/extraction_example_2.py** - Complete PO+BOM matching pipeline
+- **extractor.py** - Production-ready PO+BOM pipeline with PDF parsing
 
 Run examples:
 ```bash
-python extraction_example.py
+# Basic extraction example
+python examples/extraction_example_1.py
+
+# Complete PO+BOM example
+python examples/extraction_example_2.py
+
+# Production pipeline
 python extractor.py
 ```
 
-## Performance Tips
-
-1. **Reuse config**: Create config once, pass to all components
-   ```python
-   config = get_openai_config(use_azure=True)
-   generator = SchemaGenerator(config=config)
-   extractor = DataExtractor(config=config)
-   ```
-
-2. **Generate schema once**: Reuse schema for multiple documents
-   ```python
-   schema = generator.generate_schema(requirements)
-   # Use same schema for all documents
-   ```
-
-3. **Batch extraction**: Process multiple documents in one call
-   ```python
-   results = extractor.extract(
-       extraction_model=schema,
-       requirements=requirements,
-       user_requirements=requirements_text,
-       documents=[doc1, doc2, doc3, ...]  # Multiple docs
-   )
-   ```
-
-4. **Optimize PDF parsing**: Adjust DPI based on document quality
-   ```python
-   parser = VisionParser(
-       openai_config=config,
-       dpi=200,  # Lower DPI for simple documents
-       clean_output=False  # Skip merge step if not needed
-   )
-   ```
-
-## Troubleshooting
-
-### Import Errors
-```bash
-# Install missing dependencies
-pip install -r requirements.txt
-```
-
-### API Key Issues
-```python
-# Verify environment variables
-import os
-print(os.getenv("AZURE_API_KEY"))  # Should not be None
-```
-
-### Schema Generation Issues
-- Provide clear, specific requirements
-- Use concrete examples in requirements
-- Specify field types explicitly
-
-### Extraction Quality
-- Improve PDF parsing with higher DPI
-- Use custom prompts for specific document types
-- Enable context for multi-page documents
-
-## Contributing
-
-See [WORKFLOW.md](WORKFLOW.md) for development guidelines.
-
-## License
-
-[Add your license here]

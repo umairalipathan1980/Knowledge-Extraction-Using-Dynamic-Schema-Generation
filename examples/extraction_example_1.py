@@ -2,9 +2,13 @@
 # EXAMPLE USAGE
 # -----------------------------------------------------------------------------
 
-from extraction_config import get_openai_config
-from schema_generator import SchemaGenerator
-from data_extractor import DataExtractor
+import sys
+from pathlib import Path
+
+# Add src directory to path to import modules (works without pip install)
+sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+
+from extractors import get_openai_config, SchemaGenerator, DataExtractor
 
 
 if __name__ == "__main__":

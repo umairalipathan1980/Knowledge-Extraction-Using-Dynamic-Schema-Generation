@@ -11,8 +11,8 @@ import json
 from typing import List, Dict, Any, Optional
 from pydantic import BaseModel
 
-from extraction_config import get_openai_config, create_openai_client
-from schema_generator import (
+from .config import get_openai_config, create_openai_client
+from .schema import (
     _with_retries,
     _parse_with,
     _normalize_record,

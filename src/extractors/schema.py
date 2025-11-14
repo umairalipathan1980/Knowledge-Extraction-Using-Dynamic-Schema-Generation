@@ -1,20 +1,9 @@
 """
 Dynamic Schema Extraction with Structured Outputs
 
-A class-based system for extracting structured data from documents using LLMs.
-Automatically generates Pydantic schemas from natural language requirements and
+Schema.py extracts structured data from documents using LLMs, 
+automatically generates Pydantic schemas from natural language requirements, and
 extracts type-safe data with validation.
-
-Features:
-- Smart structure detection (flat vs nested data)
-- Automatic Pydantic model generation from natural language
-- Deterministic extraction (temperature=0, top_p=1, optional seed)
-- Strong schema validation (enums, regex patterns, formats)
-- Strict typing with Pydantic (forbid extras, constrained types)
-- Prompt hardening + fenced inputs to reduce prompt injection
-- Normalization layer (dates, EUR currency, list splitting)
-- Retries with exponential backoff
-- Support for Azure OpenAI and OpenAI
 
 Main Interface:
     from schema_generator import SchemaGenerator
@@ -38,7 +27,7 @@ from openai import OpenAI, AzureOpenAI
 from openai import APIError, RateLimitError, APITimeoutError
 
 # Import shared configuration
-from extraction_config import get_openai_config, create_openai_client
+from .config import get_openai_config, create_openai_client
 
 try:
     # Pydantic v2 style config (preferred)
