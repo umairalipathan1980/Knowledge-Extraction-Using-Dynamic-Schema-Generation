@@ -9,56 +9,6 @@ Extract structured data from documents using natural language requirements. Auto
 - **Type-Safe Extraction**: Pydantic validation with structured outputs
 - **Modular Architecture**: Separate schema generation and data extraction
 
-## Workflow
-
-```mermaid
-%%{init: {'theme':'base', 'themeVariables': { 'fontSize':'11px'}, 'flowchart':{'nodeSpacing': 30, 'rankSpacing': 40}}}%%
-graph TB
-    Start([User Provides Requirements]) --> Config[Configure OpenAI<br/>get_openai_config]
-
-    Config --> PDF{Vision<br/>Parsing?}
-
-    PDF -->|Yes| Parser[VisionParser<br/>PDF → Markdown]
-    PDF -->|No| TextDoc[Text Documents]
-
-    Parser --> Clean{Clean<br/>Markdown?}
-
-    Clean -->|Yes| CleanLLM[Clean Markdown with LLM<br/>Merge tables & remove artifacts]
-    Clean -->|No| Markdown[Markdown Content]
-
-    CleanLLM --> Markdown
-    TextDoc --> DocInput[Document Content]
-    Markdown --> DocInput
-
-    DocInput --> SchemaGen[SchemaGenerator<br/>Generate Pydantic Schema]
-
-    SchemaGen --> Detect{Structure<br/>Detection}
-    Detect -->|Flat| FlatSchema[Flat Schema<br/>One record per doc]
-    Detect -->|Nested| NestedSchema[Nested Schema<br/>Multiple items per doc]
-
-    FlatSchema --> Extract[DataExtractor<br/>Extract Structured Data]
-    NestedSchema --> Extract
-
-    Extract --> Validate[Pydantic Validation<br/>Type checking & normalization]
-
-    Validate --> Output{Save<br/>JSON?}
-
-    Output -->|Yes| JSON[JSON File<br/>extraction_results.json]
-    Output -->|No| Results[Python Dictionary<br/>List of Records]
-
-    JSON --> End([Structured Data Ready])
-    Results --> End
-
-    style Start fill:#e1f5e1
-    style Config fill:#e3f2fd
-    style Parser fill:#fff3e0
-    style CleanLLM fill:#ffe0b2
-    style SchemaGen fill:#f3e5f5
-    style Extract fill:#fce4ec
-    style End fill:#e1f5e1
-    style Validate fill:#e8f5e9
-```
-
 ## Installation
 
 ```bash
@@ -129,6 +79,8 @@ results = extractor.extract(
 
 print(results)
 ```
+
+Here, `schema` is the dynamic Pydantic model class that `SchemaGenerator` produced (for the sample prompt it includes fields like `project_title`, `project_acronym`, etc.), while `generator.item_requirements` is the structured `ExtractionRequirements` metadata describing those fields (each `FieldSpec` stores the name, type, enum, and required flag). The extractor uses the schema to validate the LLM output and uses the requirements to normalize values (e.g., convert dates to ISO, split list fields) in the final result.
 
 ### With JSON Export
 
@@ -239,9 +191,11 @@ extractors/
 │           ├── pymupdf.py    # Fast text-based PDF parser
 │           ├── docling.py    # Alternative parser (optional)
 │           └── docx.py       # Word document parser (optional)
-├── examples/                 # Usage examples
+├── examples/                 # Usage examples + generated assets
 │   ├── extraction_example_1.py  # Basic extraction example
-│   └── extraction_example_2.py  # Complete PO+BOM example
+│   ├── extraction_example_2.py  # Nest/hierarchical extraction with document classification
+│   ├── extraction_example_3.py  # Manual schema + requirements
+│   ├── extraction_example_4.py  # Persist and reload generated schema
 └── input/                    # Input documents
 ```
 
@@ -392,12 +346,19 @@ schema = generator.generate_schema(
     """
 )
 
+### Schema Persistence & Manual Models
+
+- Start from **examples/extraction_example_3.py** when you want a fixed, handwritten Pydantic schema plus the matching `ExtractionRequirements`.
+- Use **examples/extraction_example_4.py** to see how to serialize a generated schema (Python module + JSON requirements) and reload it later without rerunning SchemaGenerator.
+
 ## Examples
 
 Complete examples available in the `examples/` folder:
-- **examples/extraction_example_1.py** - Basic schema generation and extraction
-- **examples/extraction_example_2.py** - Complete PO+BOM matching pipeline
-- **extractor.py** - Production-ready PO+BOM pipeline with PDF parsing
+- **examples/extraction_example_1.py** – Basic schema generation and extraction
+- **examples/extraction_example_2.py** – Complete PO+BOM matching pipeline
+- **examples/extraction_example_3.py** – Manual schema + requirements without SchemaGenerator
+- **examples/extraction_example_4.py** – Generate, save (code + JSON), and reload schemas
+- **extractor.py** – Production-ready PO+BOM pipeline with PDF parsing
 
 Run examples:
 ```bash
