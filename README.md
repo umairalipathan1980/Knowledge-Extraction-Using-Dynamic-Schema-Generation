@@ -12,6 +12,10 @@ Extract structured data from documents using natural language requirements. Auto
 ## Installation
 
 ```bash
+# Clone the repository
+git clone https://github.com/umairalipathan1980/Knowledge-Extraction-Using-Dynamic-Schema-Generation.git
+cd Knowledge-Extraction-Using-Dynamic-Schema-Generation
+
 # Install the package in editable mode (for development)
 pip install -e .
 
