@@ -5,7 +5,6 @@
 
 # Project-specific excludes
 openai_agents_example.py
-input/
 output/
 combined_classified_output.md
 extraction_results.json
