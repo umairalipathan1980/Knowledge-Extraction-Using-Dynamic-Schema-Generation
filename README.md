@@ -358,11 +358,12 @@ schema = generator.generate_schema(
 ## Examples
 
 Complete examples available in the `examples/` folder:
-- **examples/extraction_example_1.py** – Basic schema generation and extraction
-- **examples/extraction_example_2.py** – Complete PO+BOM matching pipeline
-- **examples/extraction_example_3.py** – Manual schema + requirements without SchemaGenerator
-- **examples/extraction_example_4.py** – Generate, save (code + JSON), and reload schemas
-- **extractor.py** – Production-ready PO+BOM pipeline with PDF parsing
+- **examples/extraction_example_1.py** - Basic schema generation and extraction
+- **examples/extraction_example_2.py** - Complete PO+BOM matching pipeline
+- **examples/extraction_example_3.py** - Manual schema + requirements without SchemaGenerator
+- **examples/extraction_example_4.py** - Generate, save (code + JSON), and reload schemas
+
+> Tip: When you run the scripts with `python examples/extraction_example_*.py` from the repository root, they prepend `<repo>/src` to `sys.path` so you can execute them without installing the package. If you prefer to run them from another working directory, install the project in editable mode first (`pip install -e .`) or export `PYTHONPATH=/path/to/repo/src`.
 
 Run examples:
 ```bash
@@ -372,7 +373,10 @@ python examples/extraction_example_1.py
 # Complete PO+BOM example
 python examples/extraction_example_2.py
 
-# Production pipeline
-python extractor.py
+# Manual schema example
+python examples/extraction_example_3.py
+
+# Persist & reload schema example
+python examples/extraction_example_4.py
 ```
 
