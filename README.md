@@ -145,8 +145,8 @@ parser = VisionParser(openai_config=config)
 ```
 
 Configuration includes:
-- Deployment: `gpt-4.1`
-- Endpoint: Configured in `extraction_config.py`
+- Deployment/model: `gpt-5.1` (see `src/extractors/config.py`)
+- Endpoint: Configure via the `AZURE_ENDPOINT` environment variable
 - API Version: `2024-12-01-preview`
 
 ### Standard OpenAI
@@ -165,15 +165,15 @@ parser = VisionParser(openai_config=config)
 ```
 
 Configuration includes:
-- Model: `gpt-4.1-2025-04-14`
+- Model: `gpt-5.1-2025-11-13`
 - Uses standard OpenAI API
 
 ### Custom Models
 
 ```python
-# Override model for specific component
-generator = SchemaGenerator(config=config, model="gpt-4.1-2025-04-14")
-extractor = DataExtractor(config=config, model="gpt-4.1-2025-04-14")
+# Override model for specific component (must be valid for the selected provider)
+generator = SchemaGenerator(config=config, model="gpt-5.1-2025-11-13")
+extractor = DataExtractor(config=config, model="gpt-5.1-2025-11-13")
 ```
 
 ## Project Structure
@@ -300,15 +300,15 @@ The system automatically detects:
 
 ### Field Types
 
-Supported types:
-- `str` - Text strings
-- `int` - Integers
-- `float` - Floating point numbers
-- `decimal` - Precise decimal numbers
-- `bool` - Boolean values
-- `date` - Date strings (auto-converted to ISO format)
-- `list[str]` - Lists of strings
-- `list[dict]` - Nested structures
+Supported values for `field_type` match the `AllowedTypes` literal in `schema.py`, so use the exact strings below:
+- `str` – Free-form text
+- `int` – Integer numbers
+- `float` – Floating point numbers
+- `decimal` – Precise decimal.Decimal values (normalised when possible)
+- `bool` – Boolean values (`true`/`false`)
+- `date` – Date strings (auto-normalised to ISO 8601)
+- `list[str]` – List of strings (e.g., tags, participants)
+- `list[dict]` – Nested item collection; pair this with `StructureAnalysis.structure_type == "nested_list"` so the generator knows to wrap items in a parent container
 
 ### Field Validation
 
