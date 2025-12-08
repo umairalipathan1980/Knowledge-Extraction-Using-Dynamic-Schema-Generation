@@ -31,7 +31,7 @@ def _make_llm_client(cfg: dict):
     Create an OpenAI (or Azure OpenAI) client + return (client, model, use_azure).
     Uses deterministic settings later in classify_document().
     """
-    use_azure = cfg.get("use_azure", True)
+    use_azure = cfg.get("use_azure", False)
 
     if use_azure:
         if AzureOpenAI is None:
@@ -87,7 +87,7 @@ def classify_document(
         ],
         temperature=0,
         top_p=1.0,
-        max_tokens=50,
+        max_completion_tokens=50,
     )
 
     if use_azure:
@@ -105,7 +105,7 @@ def classify_document(
 
 def main():
     # 1) OpenAI/Azure configuration
-    config = get_openai_config(use_azure=True)  # set False to use non-Azure OpenAI
+    config = get_openai_config(use_azure=False)  # set False to use non-Azure OpenAI
     custom_prompt = ""  # Optional extra parsing instructions
 
     # 2) Initialize VisionParser (uses PyMuPDF for PDF to image conversion)
@@ -127,10 +127,10 @@ def main():
 
     # 3) PDFs to process
     pdf_paths = [
-        "input/PO.pdf",
-        "input/BOM1.pdf",
-        "input/BOM12.pdf",
-        "input/BOM13.pdf",
+        "../input/PO.pdf",
+        "../input/BOM1.pdf",
+        "../input/BOM2.pdf",
+        "../input/BOM3.pdf",
     ]
 
     # 4) Optional: build a combined output too
@@ -226,7 +226,7 @@ def extract_po_bom_data(combined_file_path: str = "./combined_classified_output.
         print("Please run the main() function first to generate the combined file.")
         return None
 
-    config = get_openai_config(use_azure=True)  # Set to False for standard OpenAI
+    config = get_openai_config(use_azure=False)  # Set to False for standard OpenAI
 
     # Step 1: Generate schema
     generator = SchemaGenerator(config=config)

@@ -97,6 +97,7 @@ def save_schema_to_python(model: type, path: Path) -> None:
 Auto-generated schema module (do not edit manually).
 """
 
+import decimal
 from decimal import Decimal
 from typing import List, Literal, Optional
 
@@ -145,7 +146,7 @@ def load_saved_requirements(path: Path) -> tuple[str, ExtractionRequirements]:
 def generate_and_persist_assets():
     """Generate schema + requirements, then write them to disk."""
     print("\n=== Generating schema and requirements ===")
-    config = get_openai_config(use_azure=True)
+    config = get_openai_config(use_azure=False)
     generator = SchemaGenerator(config=config)
     schema = generator.generate_schema(user_requirements=USER_REQUIREMENTS)
 
@@ -160,7 +161,7 @@ def load_assets_and_extract():
     SavedModel = load_saved_schema(SCHEMA_PATH, model_name)
 
     print("\n=== Running extraction with saved schema ===")
-    config = get_openai_config(use_azure=True)
+    config = get_openai_config(use_azure=False)
     extractor = DataExtractor(config=config)
     results = extractor.extract(
         extraction_model=SavedModel,

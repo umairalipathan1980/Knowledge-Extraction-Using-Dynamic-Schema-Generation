@@ -228,7 +228,7 @@ If this page continues a table or section from the previous page, continue it se
                     ]
                 }
             ],
-            max_tokens=16000,  # Increased to capture all content
+            max_completion_tokens=16000,  # Increased to capture all content
             temperature=0
         )
 
@@ -280,7 +280,7 @@ OUTPUT: Return ONLY the cleaned, merged markdown. No explanations, no code block
                     "content": cleanup_prompt.format(markdown=combined)
                 }
             ],
-            max_tokens=16000,
+            max_completion_tokens=16000,
             temperature=0
         )
 

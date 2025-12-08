@@ -83,7 +83,7 @@ if __name__ == "__main__":
     print("MANUAL SCHEMA EXTRACTION EXAMPLE")
     print("=" * 80)
 
-    config = get_openai_config(use_azure=True)
+    config = get_openai_config(use_azure=False)
     extractor = DataExtractor(config=config)
 
     results = extractor.extract(

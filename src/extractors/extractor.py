@@ -8,16 +8,16 @@ using pre-generated Pydantic models.
 from __future__ import annotations
 
 import json
-from typing import List, Dict, Any, Optional
+
 from pydantic import BaseModel
 
-from .config import get_openai_config, create_openai_client
+from .config import create_openai_client
+
 from .schema import (
-    _with_retries,
-    _parse_with,
-    _normalize_record,
+    SYSTEM_PARSER,
     ExtractionRequirements,
-    SYSTEM_PARSER
+    normalize_extracted_data,
+    _parse_with,
 )
 
 
@@ -29,7 +29,7 @@ def save_to_json(results: list[dict], json_path: str) -> None:
         results: List of extraction results (dicts)
         json_path: Output JSON file path
     """
-    with open(json_path, 'w', encoding='utf-8') as f:
+    with open(json_path, "w", encoding="utf-8") as f:
         json.dump(results, f, indent=2, default=str)
     print(f"✓ Results saved to: {json_path}")
 
@@ -73,7 +73,7 @@ class DataExtractor:
         )
     """
 
-    def __init__(self, config: dict, model: Optional[str] = None):
+    def __init__(self, config: dict, model: str | None = None):
         """
         Initialize the DataExtractor.
 
@@ -82,7 +82,7 @@ class DataExtractor:
             model: Optional model name override
         """
         self.config = config
-        self.model = model if model else self.config['model']
+        self.model = model if model else self.config["model"]
         self.client = create_openai_client(self.config)
 
     def extract(
@@ -92,7 +92,7 @@ class DataExtractor:
         user_requirements: str,
         documents: list[str],
         save_json: bool = False,
-        json_path: str = "extraction_results.json"
+        json_path: str = "extraction_results.json",
     ) -> list[dict]:
         """
         Extract structured data from documents using a pre-generated Pydantic model.
@@ -108,9 +108,9 @@ class DataExtractor:
         Returns:
             List of extraction results (dicts)
         """
-        print("\n" + "="*80)
+        print("\n" + "=" * 80)
         print("EXTRACTION PHASE")
-        print("="*80)
+        print("=" * 80)
         results: list[dict] = []
 
         for i, doc in enumerate(documents, start=1):
@@ -121,8 +121,7 @@ class DataExtractor:
                 {
                     "role": "user",
                     "content": (
-                        f"EXTRACTION TASK:\n{user_requirements}\n\n"
-                        f"Document:\n```txt\n{doc}\n```"
+                        f"EXTRACTION TASK:\n{user_requirements}\n\nDocument:\n```txt\n{doc}\n```"
                     ),
                 },
             ]
@@ -131,7 +130,7 @@ class DataExtractor:
                 client=self.client,
                 model=self.model,
                 messages=messages,
-                response_format=extraction_model
+                response_format=extraction_model,
             )
 
             if getattr(resp, "usage", None):
@@ -140,18 +139,16 @@ class DataExtractor:
             parsed = resp.choices[0].message.parsed
             result_dict = parsed.model_dump()
 
-            # Normalize items
+            # Normalize extracted data (dates, lists, etc.)
             if isinstance(result_dict, dict):
                 # If nested container exists, normalize each item
                 for key, value in list(result_dict.items()):
                     if isinstance(value, list) and value and isinstance(value[0], dict):
                         result_dict[key] = [
-                            _normalize_record(item, requirements)
-                            for item in value
+                            normalize_extracted_data(item, requirements) for item in value
                         ]
                 # Also normalize the flat record itself
-                flat_norm = _normalize_record(result_dict, requirements)
-                result_dict.update(flat_norm)
+                result_dict = normalize_extracted_data(result_dict, requirements)
 
             results.append(result_dict)
 

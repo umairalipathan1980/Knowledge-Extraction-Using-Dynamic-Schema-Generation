@@ -33,16 +33,15 @@ def get_openai_config(use_azure: bool = True) -> dict:
         return {
             'use_azure': True,
             'api_key': os.getenv("AZURE_API_KEY"),
-            'azure_endpoint': "https://haagahelia-poc-gaik.openai.azure.com/openai/deployments/gpt-4.1/chat/completions?",
-            'azure_audio_endpoint': "https://haagahelia-poc-gaik.openai.azure.com/openai/deployments/whisper/audio/translations?api-version=2024-06-01",
+            'azure_endpoint': "AZURE_ENDPOINT",
             'api_version': "2024-12-01-preview",
-            'model': 'gpt-4.1',   #gpt-5    #gpt-4.1
+            'model': 'gpt-5.1',   
         }
     else:
         return {
             'use_azure': False,
             'api_key': os.getenv("OPENAI_API_KEY"),
-            'model': 'gpt-4.1-2025-04-14',  #gpt-5-2025-08-07    #gpt-4.1-2025-04-14
+            'model': 'gpt-5.1-2025-11-13',  
         }
 
 
