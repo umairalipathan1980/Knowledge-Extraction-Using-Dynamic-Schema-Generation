@@ -2,6 +2,8 @@
 
 Extract structured data from documents using natural language requirements. Automatically generates Pydantic schemas and validates extracted data.
 
+**For a detailed explanation of the design and development of this code, see the related article on [*Data Science Collective*](https://medium.com/data-science-collective/building-a-generic-knowledge-extraction-ai-framework-for-organization-specific-use-cases-cbb52ce93e48)**
+
 ## Features
 
 - **Natural Language → Schema**: Describe extraction needs in plain English
@@ -379,4 +381,5 @@ python examples/extraction_example_3.py
 # Persist & reload schema example
 python examples/extraction_example_4.py
 ```
+
 
